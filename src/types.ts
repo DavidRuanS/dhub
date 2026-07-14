@@ -1,11 +1,13 @@
-export type Tab = 'home' | 'agenda' | 'tasks' | 'finance' | 'car' | 'market'
+export type Tab = 'home' | 'agenda' | 'tasks' | 'finance' | 'car' | 'market' | 'settings'
 
 export type Task = { id:string; title:string; due_date:string|null; due_time:string|null; priority:'baixa'|'media'|'alta'; category:string; completed:boolean; remind:boolean; created_at:string }
 export type EventItem = { id:string; title:string; event_date:string; event_time:string|null; category:string; notes:string; created_at:string }
 export type Transaction = { id:string; type:'income'|'expense'; amount:number; description:string; category:string; transaction_date:string; is_extra:boolean; is_fixed:boolean; status:'paid'|'pending'; source:'manual'|'car'|'market'; created_at:string }
-export type Vehicle = { id:string; nickname:string; model:string; year:string; mileage:number; created_at:string }
+export type Vehicle = { id:string; nickname:string; model:string; year:string; mileage:number; vehicle_type:'carro'|'moto'|'outro'; created_at:string }
 export type Maintenance = { id:string; vehicle_id:string; title:string; cost:number; performed_date:string; performed_mileage:number|null; next_date:string|null; next_mileage:number|null; notes:string; created_at:string }
 export type FuelEntry = { id:string; vehicle_id:string; amount:number; liters:number|null; mileage:number|null; fuel_type:string; entry_date:string; created_at:string }
-export type ShoppingItem = { id:string; name:string; quantity:string; category:string; estimated_price:number|null; actual_price:number|null; purchased:boolean; created_at:string }
+export type ShoppingList = { id:string; name:string; reference_month:string|null; created_at:string }
+export type ShoppingItem = { id:string; list_id:string|null; name:string; quantity:number; unit:string; category:string; unit_price:number|null; estimated_price:number|null; actual_price:number|null; purchased:boolean; created_at:string }
+export type VehicleDocument = { id:string; vehicle_id:string; document_type:string; amount:number|null; due_date:string; paid:boolean; remind_months:number; notes:string; created_at:string }
 export type Settings = { display_name:string; monthly_salary:number; payday:number }
-export type AppState = { tasks:Task[]; events:EventItem[]; transactions:Transaction[]; vehicles:Vehicle[]; maintenance:Maintenance[]; fuel:FuelEntry[]; shopping:ShoppingItem[]; settings:Settings }
+export type AppState = { tasks:Task[]; events:EventItem[]; transactions:Transaction[]; vehicles:Vehicle[]; maintenance:Maintenance[]; fuel:FuelEntry[]; shoppingLists:ShoppingList[]; shopping:ShoppingItem[]; vehicleDocuments:VehicleDocument[]; settings:Settings }
