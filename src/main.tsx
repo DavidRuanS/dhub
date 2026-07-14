@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
+import AuthGate from './AuthGate'
 import './styles.css'
 
 if ('serviceWorker' in navigator) {
@@ -10,5 +10,5 @@ if ('serviceWorker' in navigator) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><App /></StrictMode>,
+  <StrictMode><AuthGate /></StrictMode>,
 )
