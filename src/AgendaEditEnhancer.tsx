@@ -3,7 +3,12 @@ import { createPortal } from 'react-dom'
 import { supabase } from './lib/supabase'
 import type { EventItem } from './types'
 
-type EventTarget = { event: EventItem; target: HTMLElement }
+type RowTarget = {
+  target: HTMLElement
+  title: string
+  subtitle: string
+}
+
 type EventDraft = {
   title: string
   event_date: string
@@ -24,6 +29,11 @@ function eventSubtitle(event: EventItem) {
   return `${formattedDate(event.event_date)} · ${event.event_time || 'Dia todo'} · ${event.category}${event.notes ? ` · ${event.notes}` : ''}`
 }
 
+function subtitleDate(value: string) {
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : ''
+}
+
 function splitNotes(value: string) {
   const parts = value.split(' | ')
   const first = parts[0] || ''
@@ -38,90 +48,100 @@ function updateLocalEvent(id: string, patch: Partial<EventItem>) {
     state.events = state.events.map((event: EventItem) => event.id === id ? { ...event, ...patch } : event)
     localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(state))
   } catch {
-    // Supabase remains the source of truth when local cache is unavailable.
+    // O Supabase continua sendo a fonte principal dos dados.
   }
 }
 
+function sameTargets(current: RowTarget[], next: RowTarget[]) {
+  return current.length === next.length && current.every((item, index) =>
+    item.target === next[index].target && item.title === next[index].title && item.subtitle === next[index].subtitle,
+  )
+}
+
 export default function AgendaEditEnhancer() {
-  const [targets, setTargets] = useState<EventTarget[]>([])
+  const [targets, setTargets] = useState<RowTarget[]>([])
   const [editing, setEditing] = useState<EventItem | null>(null)
   const [draft, setDraft] = useState<EventDraft | null>(null)
   const [saving, setSaving] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    let cancelled = false
     let timer = 0
 
-    const refresh = async () => {
-      if (!supabase || cancelled) return
+    const scan = () => {
       const sections = Array.from(document.querySelectorAll<HTMLElement>('.app main section'))
       const agenda = sections.find(section => section.querySelector('h1')?.textContent?.trim() === 'Agenda')
       if (!agenda) {
-        setTargets([])
+        setTargets(current => current.length ? [] : current)
         return
       }
 
-      const rows = Array.from(agenda.querySelectorAll<HTMLElement>('.list > .row'))
-      if (!rows.length) {
-        setTargets([])
-        return
-      }
-
-      const { data, error: readError } = await supabase
-        .from('events')
-        .select('id,title,event_date,event_time,category,notes,created_at')
-        .order('event_date', { ascending: true })
-        .order('created_at', { ascending: true })
-
-      if (cancelled || readError || !data) return
-      const events = data as EventItem[]
-      const used = new Set<string>()
-      const nextTargets: EventTarget[] = []
-
-      for (const row of rows) {
+      const next = Array.from(agenda.querySelectorAll<HTMLElement>('.list > .row')).flatMap(row => {
+        const target = row.querySelector<HTMLElement>(':scope > aside')
+        if (!target) return []
         const title = row.querySelector<HTMLElement>(':scope > div > b')?.textContent?.trim() || ''
         const subtitle = row.querySelector<HTMLElement>(':scope > div > small')?.textContent?.trim() || ''
-        const event = events.find(item => !used.has(item.id) && item.title === title && eventSubtitle(item) === subtitle)
-          || events.find(item => !used.has(item.id) && item.title === title && subtitle.startsWith(formattedDate(item.event_date)))
-        const target = row.querySelector<HTMLElement>(':scope > aside')
-        if (!event || !target) continue
-        used.add(event.id)
-        nextTargets.push({ event, target })
-      }
+        return [{ target, title, subtitle }]
+      })
 
-      setTargets(nextTargets)
+      setTargets(current => sameTargets(current, next) ? current : next)
     }
 
-    const scheduleRefresh = () => {
+    const scheduleScan = () => {
       window.clearTimeout(timer)
-      timer = window.setTimeout(refresh, 120)
+      timer = window.setTimeout(scan, 80)
     }
 
-    scheduleRefresh()
-    const observer = new MutationObserver(scheduleRefresh)
+    scan()
+    const observer = new MutationObserver(scheduleScan)
     observer.observe(document.body, { childList: true, subtree: true })
 
     return () => {
-      cancelled = true
       window.clearTimeout(timer)
       observer.disconnect()
     }
   }, [])
 
-  function openEditor(event: EventItem) {
-    const parsed = splitNotes(event.notes || '')
-    setEditing(event)
+  async function openEditor(row: RowTarget) {
+    if (!supabase) {
+      setError('O Supabase não está configurado.')
+      return
+    }
+
+    setResolving(true)
+    setError('')
+
+    const date = subtitleDate(row.subtitle)
+    let query = supabase
+      .from('events')
+      .select('id,title,event_date,event_time,category,notes,created_at')
+      .eq('title', row.title)
+
+    if (date) query = query.eq('event_date', date)
+
+    const { data, error: readError } = await query.order('created_at', { ascending: true })
+    setResolving(false)
+
+    if (readError || !data?.length) {
+      setError('Não foi possível localizar este compromisso. Recarregue a página e tente novamente.')
+      return
+    }
+
+    const events = data as EventItem[]
+    const found = events.find(event => eventSubtitle(event) === row.subtitle) || events[0]
+    const parsed = splitNotes(found.notes || '')
+
+    setEditing(found)
     setDraft({
-      title: event.title,
-      event_date: event.event_date,
-      event_time: event.event_time?.slice(0, 5) || '',
-      all_day: !event.event_time,
-      category: event.category || 'Pessoal',
+      title: found.title,
+      event_date: found.event_date,
+      event_time: found.event_time?.slice(0, 5) || '',
+      all_day: !found.event_time,
+      category: found.category || 'Pessoal',
       location: parsed.location,
       notes: parsed.notes,
     })
-    setError('')
   }
 
   function closeEditor() {
@@ -158,6 +178,7 @@ export default function AgendaEditEnhancer() {
     setSaving(true)
     setError('')
     const { error: updateError } = await supabase.from('events').update(patch).eq('id', editing.id)
+
     if (updateError) {
       setError(updateError.message || 'Não foi possível atualizar o compromisso.')
       setSaving(false)
@@ -169,17 +190,23 @@ export default function AgendaEditEnhancer() {
   }
 
   return <>
-    {targets.map(({ event, target }) => createPortal(
+    {targets.map((row, index) => createPortal(
       <button
         type="button"
         className="agendaEditButton"
-        aria-label={`Editar ${event.title}`}
+        aria-label={`Editar ${row.title || 'compromisso'}`}
         title="Editar compromisso"
-        onClick={() => openEditor(event)}
+        disabled={resolving}
+        onClick={() => openEditor(row)}
       >✎</button>,
-      target,
-      event.id,
+      row.target,
+      `${row.title}-${row.subtitle}-${index}`,
     ))}
+
+    {error && !editing && createPortal(
+      <div className="agendaEditToast" role="alert">⚠ {error}<button type="button" onClick={() => setError('')}>×</button></div>,
+      document.body,
+    )}
 
     {editing && draft && createPortal(
       <div className="agendaEditShade" onMouseDown={event => event.target === event.currentTarget && closeEditor()}>
