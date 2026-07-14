@@ -1,39 +1,29 @@
 # DHub
 
-Aplicativo pessoal mobile-first para organizar agenda, tarefas, finanças, veículo e lista de mercado.
+Site pessoal mobile-first para agenda, tarefas, finanças, veículo e lista de mercado.
 
-## Recursos da primeira versão
+## Link previsto
 
-- Dashboard com saldo previsto, tarefas, agenda, mercado e veículo.
-- Salário, renda extra, gasto extra, despesas pagas e pendentes.
-- Manutenções e abastecimentos com pergunta antes de registrar em Finanças.
-- Lista de mercado com opção de não registrar o valor quando outra pessoa pagar.
-- PWA instalável no celular e lembretes locais.
-- Modo local antes da conexão com o Supabase.
+Depois de habilitar o GitHub Pages e a publicação terminar:
 
-## Configurar o Supabase
+`https://davidruans.github.io/dhub/`
+
+Não é necessário instalar nada. Basta abrir o link no celular ou computador.
+
+## Banco Supabase
 
 1. Abra **SQL Editor > New query**.
-2. Cole e execute `supabase/schema.sql`.
+2. Cole e execute todo o arquivo `supabase/schema.sql`.
 3. Abra **Authentication > Providers > Anonymous** e habilite o acesso anônimo.
-4. Copie a Project URL e a chave Publishable.
-5. Crie `.env.local` usando `.env.example` como modelo.
+4. Copie somente a **Project URL** e a **Publishable Key**.
 
-A sessão anônima evita uma tela de login e permite proteger os dados com RLS. Como ela pertence ao navegador, não limpe os dados do site nem troque de aparelho antes de futuramente vincular a sessão a um e-mail.
+Nunca envie a senha do banco, `service_role` ou `secret key`.
 
-## Executar
+## Publicação no GitHub Pages
 
-```bash
-npm install
-npm run dev
-```
+Em **Settings > Pages**, selecione **GitHub Actions** como fonte. O workflow `.github/workflows/deploy.yml` publica o site automaticamente a cada atualização da branch `main`.
 
-## Validar
+As variáveis utilizadas pela publicação são:
 
-```bash
-npm run build
-```
-
-## Publicar
-
-Importe o repositório na Vercel e cadastre `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` nas variáveis de ambiente.
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
