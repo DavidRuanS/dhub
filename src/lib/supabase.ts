@@ -1,16 +1,42 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
 
 export const hasSupabase = Boolean(url && key && !url.includes('SEU-PROJETO'))
-export const supabase: SupabaseClient | null = hasSupabase ? createClient(url!, key!) : null
+export const supabase: SupabaseClient | null = hasSupabase ? createClient(url!, key!, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+}) : null
 
-export async function ensureAnonymousSession() {
+export async function getSession(): Promise<Session | null> {
   if (!supabase) return null
-  const { data } = await supabase.auth.getSession()
-  if (data.session) return data.session
-  const result = await supabase.auth.signInAnonymously()
-  if (result.error) throw result.error
-  return result.data.session
+  const { data, error } = await supabase.auth.getSession()
+  if (error) throw error
+  return data.session
+}
+
+// Mantido com este nome para compatibilidade com o restante do projeto.
+// Agora não cria mais usuário anônimo: a mesma conta é usada em todos os aparelhos.
+export async function ensureAnonymousSession() {
+  return getSession()
+}
+
+export async function signIn(email: string, password: string) {
+  if (!supabase) throw new Error('Supabase não configurado.')
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw error
+  return data.session
+}
+
+export async function signUp(email: string, password: string) {
+  if (!supabase) throw new Error('Supabase não configurado.')
+  const { data, error } = await supabase.auth.signUp({ email, password })
+  if (error) throw error
+  return data.session
+}
+
+export async function signOut() {
+  if (!supabase) return
+  const { error } = await supabase.auth.signOut()
+  if (error) throw error
 }
