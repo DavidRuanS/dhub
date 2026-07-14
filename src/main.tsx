@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import AuthGate from './AuthGate'
+import WalletEnhancer from './WalletEnhancer'
 import './styles.css'
 import './overrides.css'
 
@@ -11,5 +12,5 @@ if ('serviceWorker' in navigator) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><AuthGate /></StrictMode>,
+  <StrictMode><AuthGate /><WalletEnhancer /></StrictMode>,
 )
