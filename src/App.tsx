@@ -1,393 +1,74 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import {
-  emptyState,
-  loadState,
-  makeEvent,
-  makeFuel,
-  makeMaintenance,
-  makeShopping,
-  makeTask,
-  makeTransaction,
-  makeVehicle,
-  persistState,
-  today,
-} from './data'
+import { emptyState, loadState, makeEvent, makeFuel, makeMaintenance, makeShopping, makeTask, makeTransaction, makeVehicle, persistState, today } from './data'
 import { hasSupabase } from './lib/supabase'
 import type { AppState, Tab } from './types'
 
-type ModalKind = 'task' | 'event' | 'transaction' | 'vehicle' | 'fuel' | 'maintenance' | 'shopping' | 'settings' | null
+type Kind = 'task'|'event'|'transaction'|'vehicle'|'fuel'|'maintenance'|'shopping'|'settings'|null
+type Draft = Record<string,string>
+type Period = 'week'|'month'|'all'
+const nav:[Tab,string,string][]=[['home','Início','⌂'],['tasks','Tarefas','✓'],['finance','Finanças','R$'],['car','Carro','🚗'],['market','Mercado','🛒']]
+const brl=(n:number)=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})
+const date=(v:string|null)=>v?new Date(v+'T12:00:00').toLocaleDateString('pt-BR'):'Sem data'
+const num=(v?:string)=>Number(String(v||'0').replace(',','.'))||0
+const startOfWeek=()=>{const d=new Date();const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toISOString().slice(0,10)}
 
-type Draft = Record<string, string>
-
-const nav: [Tab, string, string][] = [
-  ['home', 'Início', '⌂'],
-  ['tasks', 'Tarefas', '✓'],
-  ['finance', 'Finanças', 'R$'],
-  ['car', 'Carro', '🚗'],
-  ['market', 'Mercado', '🛒'],
-]
-
-const brl = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const formatDate = (value: string | null) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem data'
-const toNumber = (value: string | undefined) => Number(String(value || '0').replace(',', '.')) || 0
-
-export default function App() {
-  const [state, setState] = useState<AppState>(emptyState)
-  const [tab, setTab] = useState<Tab>('home')
-  const [ready, setReady] = useState(false)
-  const [menu, setMenu] = useState(false)
-  const [modal, setModal] = useState<ModalKind>(null)
-  const [draft, setDraft] = useState<Draft>({})
-
-  useEffect(() => {
-    loadState().then((loaded) => {
-      setState(loaded)
-      setReady(true)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!ready) return
-    const timer = window.setTimeout(() => persistState(state), 300)
-    return () => window.clearTimeout(timer)
-  }, [state, ready])
-
-  const update = (fn: (current: AppState) => AppState) => setState((current) => fn(current))
-  const currentMonth = today().slice(0, 7)
-  const monthTransactions = state.transactions.filter((item) => item.transaction_date.startsWith(currentMonth))
-  const income = monthTransactions.filter((item) => item.type === 'income' && item.status === 'paid').reduce((sum, item) => sum + Number(item.amount), 0) + Number(state.settings.monthly_salary || 0)
-  const spent = monthTransactions.filter((item) => item.type === 'expense' && item.status === 'paid').reduce((sum, item) => sum + Number(item.amount), 0)
-  const pending = monthTransactions.filter((item) => item.type === 'expense' && item.status === 'pending').reduce((sum, item) => sum + Number(item.amount), 0)
-  const balance = income - spent - pending
-  const dueToday = state.tasks.filter((item) => !item.completed && item.due_date === today())
-  const upcomingEvents = state.events.filter((item) => item.event_date >= today()).sort((a, b) => a.event_date.localeCompare(b.event_date))
-  const openShopping = state.shopping.filter((item) => !item.purchased)
-  const vehicle = state.vehicles[0]
-
-  const expenseByCategory = useMemo(() => {
-    const map = new Map<string, number>()
-    monthTransactions.filter((item) => item.type === 'expense').forEach((item) => map.set(item.category, (map.get(item.category) || 0) + Number(item.amount)))
-    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4)
-  }, [monthTransactions])
-
-  if (!ready) return <div className="load"><i>D</i><b>Preparando o DHub</b><span>Carregando sua rotina...</span></div>
-
-  function openModal(kind: ModalKind, initial: Draft = {}) {
-    setDraft(initial)
-    setModal(kind)
-  }
-
-  function closeModal() {
-    setModal(null)
-    setDraft({})
-  }
-
-  function setField(name: string, value: string) {
-    setDraft((current) => ({ ...current, [name]: value }))
-  }
-
-  function remove(kind: 'tasks' | 'events' | 'transactions' | 'maintenance' | 'fuel' | 'shopping', id: string) {
-    update((current) => ({ ...current, [kind]: current[kind].filter((item) => item.id !== id) } as AppState))
-  }
-
-  function toggleTask(id: string) {
-    update((current) => ({ ...current, tasks: current.tasks.map((item) => item.id === id ? { ...item, completed: !item.completed } : item) }))
-  }
-
-  function saveModal(event: FormEvent) {
-    event.preventDefault()
-    if (!modal) return
-
-    if (modal === 'task' && draft.title) {
-      update((current) => ({ ...current, tasks: [...current.tasks, makeTask({
-        title: draft.title,
-        due_date: draft.date || today(),
-        due_time: draft.time || null,
-        category: draft.category || 'Pessoal',
-        priority: (draft.priority as 'baixa' | 'media' | 'alta') || 'media',
-      })] }))
-    }
-
-    if (modal === 'event' && draft.title) {
-      update((current) => ({ ...current, events: [...current.events, makeEvent({
-        title: draft.title,
-        event_date: draft.date || today(),
-        event_time: draft.time || null,
-        category: draft.category || 'Pessoal',
-        notes: draft.notes || '',
-      })] }))
-    }
-
-    if (modal === 'transaction' && draft.description) {
-      update((current) => ({ ...current, transactions: [...current.transactions, makeTransaction({
-        type: draft.type === 'income' ? 'income' : 'expense',
-        description: draft.description,
-        amount: toNumber(draft.amount),
-        category: draft.category || 'Outros',
-        transaction_date: draft.date || today(),
-        status: draft.status === 'pending' ? 'pending' : 'paid',
-        is_extra: draft.extra === 'yes',
-        is_fixed: draft.fixed === 'yes',
-      })] }))
-    }
-
-    if (modal === 'vehicle' && draft.nickname) {
-      update((current) => ({ ...current, vehicles: [makeVehicle({
-        nickname: draft.nickname,
-        model: draft.model || 'Veículo',
-        year: draft.year || '',
-        mileage: toNumber(draft.mileage),
-      })] }))
-    }
-
-    if (modal === 'fuel' && vehicle) {
-      const amount = toNumber(draft.amount)
-      const register = draft.finance !== 'no'
-      update((current) => ({
-        ...current,
-        fuel: [...current.fuel, makeFuel({
-          vehicle_id: vehicle.id,
-          amount,
-          liters: draft.liters ? toNumber(draft.liters) : null,
-          mileage: draft.mileage ? toNumber(draft.mileage) : vehicle.mileage,
-          fuel_type: draft.fuelType || 'Gasolina',
-          entry_date: draft.date || today(),
-        })],
-        transactions: register ? [...current.transactions, makeTransaction({
-          type: 'expense',
-          description: 'Abastecimento',
-          amount,
-          category: 'Carro - Combustível',
-          source: 'car',
-          transaction_date: draft.date || today(),
-        })] : current.transactions,
-      }))
-    }
-
-    if (modal === 'maintenance' && vehicle && draft.title) {
-      const cost = toNumber(draft.amount)
-      const register = draft.finance !== 'no'
-      update((current) => ({
-        ...current,
-        maintenance: [...current.maintenance, makeMaintenance({
-          vehicle_id: vehicle.id,
-          title: draft.title,
-          cost,
-          performed_date: draft.date || today(),
-          performed_mileage: draft.mileage ? toNumber(draft.mileage) : vehicle.mileage,
-          next_date: draft.nextDate || null,
-          next_mileage: draft.nextMileage ? toNumber(draft.nextMileage) : null,
-          notes: draft.notes || '',
-        })],
-        transactions: register && cost > 0 ? [...current.transactions, makeTransaction({
-          type: 'expense',
-          description: draft.title,
-          amount: cost,
-          category: 'Carro - Manutenção',
-          source: 'car',
-          transaction_date: draft.date || today(),
-        })] : current.transactions,
-      }))
-    }
-
-    if (modal === 'shopping' && draft.name) {
-      update((current) => ({ ...current, shopping: [...current.shopping, makeShopping({
-        name: draft.name,
-        quantity: draft.quantity || '1 un.',
-        category: draft.category || 'Alimentos',
-        estimated_price: draft.amount ? toNumber(draft.amount) : null,
-      })] }))
-    }
-
-    if (modal === 'settings') {
-      update((current) => ({ ...current, settings: {
-        ...current.settings,
-        display_name: draft.name || current.settings.display_name,
-        monthly_salary: toNumber(draft.salary),
-        payday: Math.min(31, Math.max(1, toNumber(draft.payday) || 1)),
-      } }))
-    }
-
-    closeModal()
-  }
-
-  function quickAction(kind: ModalKind) {
-    if (kind === 'fuel' || kind === 'maintenance') {
-      if (!vehicle) return openModal('vehicle', { nickname: 'Minha Spin', model: 'Chevrolet Spin', year: '2014', mileage: '270000' })
-    }
-    const defaults: Record<string, Draft> = {
-      task: { date: today(), priority: 'media', category: 'Pessoal' },
-      event: { date: today(), category: 'Pessoal' },
-      transaction: { type: 'expense', date: today(), status: 'paid', category: 'Outros', extra: 'no', fixed: 'no' },
-      fuel: { date: today(), fuelType: 'Gasolina', mileage: String(vehicle?.mileage || ''), finance: 'yes' },
-      maintenance: { date: today(), mileage: String(vehicle?.mileage || ''), finance: 'yes' },
-      shopping: { quantity: '1 un.', category: 'Alimentos' },
-    }
-    openModal(kind, defaults[String(kind)] || {})
-  }
-
-  function finishShopping() {
-    const purchased = state.shopping.filter((item) => item.purchased)
-    if (!purchased.length) return
-    const total = purchased.reduce((sum, item) => sum + Number(item.actual_price || item.estimated_price || 0), 0)
-    const register = window.confirm(`Compra finalizada em ${brl(total)}. Registrar nas Finanças?`)
-    update((current) => ({
-      ...current,
-      shopping: current.shopping.filter((item) => !item.purchased),
-      transactions: register ? [...current.transactions, makeTransaction({ type: 'expense', description: 'Compra de mercado', amount: total, category: 'Alimentação', source: 'market' })] : current.transactions,
-    }))
-  }
-
-  async function enableNotifications() {
-    if (!('Notification' in window)) return window.alert('Este navegador não oferece notificações.')
-    const result = await Notification.requestPermission()
-    window.alert(result === 'granted' ? 'Notificações ativadas.' : 'Permissão não concedida.')
-  }
-
-  return (
-    <div className="app">
-      <header>
-        <button className="iconButton" onClick={() => setMenu(true)} aria-label="Abrir menu">☰</button>
-        <div className="brand"><b>DHub</b><small><i className={hasSupabase ? 'online' : ''} />{hasSupabase ? 'Sincronizado' : 'Modo local'}</small></div>
-        <button className="avatar" onClick={() => openModal('settings', { name: state.settings.display_name, salary: String(state.settings.monthly_salary), payday: String(state.settings.payday) })}>{state.settings.display_name[0]?.toUpperCase()}</button>
-      </header>
-
-      {menu && <div className="shade" onClick={() => setMenu(false)}>
-        <aside onClick={(event) => event.stopPropagation()}>
-          <div className="menuHead"><span>D</span><div><b>DHub</b><small>Sua vida organizada</small></div></div>
-          {[...nav, ['agenda', 'Agenda', '▦'] as [Tab, string, string]].map(([id, label, icon]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMenu(false) }}><b>{icon}</b>{label}<span>›</span></button>)}
-          <button onClick={() => { setMenu(false); openModal('settings', { name: state.settings.display_name, salary: String(state.settings.monthly_salary), payday: String(state.settings.payday) }) }}><b>⚙</b>Configurações<span>›</span></button>
-        </aside>
-      </div>}
-
-      <main>
-        {tab === 'home' && <section>
-          <div className="hero">
-            <div><span>{new Date().getHours() < 12 ? 'Bom dia' : new Date().getHours() < 18 ? 'Boa tarde' : 'Boa noite'},</span><h1>{state.settings.display_name} 👋</h1><p>{new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
-            <button onClick={() => openModal('settings', { name: state.settings.display_name, salary: String(state.settings.monthly_salary), payday: String(state.settings.payday) })}>⚙</button>
-          </div>
-
-          <article className="balanceCard">
-            <div><span>Saldo previsto do mês</span><b className={balance < 0 ? 'negative' : ''}>{brl(balance)}</b><small>{brl(income)} em entradas</small></div>
-            <div className="balanceMeta"><span><i className="expenseDot" />{brl(spent)} gastos</span><span><i className="pendingDot" />{brl(pending)} pendentes</span></div>
-          </article>
-
-          <div className="quickActions">
-            <button onClick={() => quickAction('task')}><i>✓</i><span>Tarefa</span></button>
-            <button onClick={() => quickAction('transaction')}><i>R$</i><span>Movimentação</span></button>
-            <button onClick={() => quickAction('event')}><i>▦</i><span>Agenda</span></button>
-            <button onClick={() => quickAction('shopping')}><i>🛒</i><span>Mercado</span></button>
-          </div>
-
-          <div className="sectionTitle"><div><h2>Visão geral</h2><p>O que precisa da sua atenção</p></div></div>
-          <div className="overviewGrid">
-            <button onClick={() => setTab('tasks')}><div className="overviewIcon mint">✓</div><div><b>{dueToday.length}</b><span>Tarefas hoje</span><small>{state.tasks.filter((item) => !item.completed).length} pendentes no total</small></div></button>
-            <button onClick={() => setTab('agenda')}><div className="overviewIcon blue">▦</div><div><b>{upcomingEvents.length}</b><span>Próximos eventos</span><small>{upcomingEvents[0] ? `${formatDate(upcomingEvents[0].event_date)} • ${upcomingEvents[0].title}` : 'Agenda livre'}</small></div></button>
-            <button onClick={() => setTab('market')}><div className="overviewIcon orange">🛒</div><div><b>{openShopping.length}</b><span>Itens no mercado</span><small>{brl(openShopping.reduce((sum, item) => sum + Number(item.estimated_price || 0), 0))} estimados</small></div></button>
-            <button onClick={() => setTab('car')}><div className="overviewIcon dark">🚗</div><div><b>{vehicle ? vehicle.mileage.toLocaleString('pt-BR') : '0'}</b><span>{vehicle ? 'km registrados' : 'Nenhum veículo'}</span><small>{state.maintenance.length} manutenções salvas</small></div></button>
-          </div>
-
-          <div className="sectionTitle"><div><h2>Seu dia</h2><p>Prioridades de hoje</p></div><button onClick={() => setTab('tasks')}>Ver tudo</button></div>
-          <div className="timeline">
-            {dueToday.slice(0, 4).map((item) => <article key={item.id}><button className="check" onClick={() => toggleTask(item.id)}>○</button><div><b>{item.title}</b><span>{item.due_time || 'Durante o dia'} • {item.category}</span></div><em className={`priority ${item.priority}`}>{item.priority}</em></article>)}
-            {!dueToday.length && <div className="emptyState"><i>✓</i><b>Dia organizado</b><span>Nenhuma tarefa marcada para hoje.</span></div>}
-          </div>
-        </section>}
-
-        {tab === 'tasks' && <section>
-          <PageHeader title="Tarefas" subtitle="Organize prioridades e prazos" action={() => quickAction('task')} />
-          <div className="filterPills"><button className="active">Pendentes {state.tasks.filter((item) => !item.completed).length}</button><button>Hoje {dueToday.length}</button><button>Concluídas {state.tasks.filter((item) => item.completed).length}</button></div>
-          <div className="list modernList">
-            {state.tasks.filter((item) => !item.completed).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date))).map((item) => <article key={item.id}><button className="check" onClick={() => toggleTask(item.id)}>○</button><div><b>{item.title}</b><small>{formatDate(item.due_date)}{item.due_time ? ` às ${item.due_time}` : ''} • {item.category}</small></div><em className={`priority ${item.priority}`}>{item.priority}</em><button className="remove" onClick={() => remove('tasks', item.id)}>×</button></article>)}
-            {!state.tasks.some((item) => !item.completed) && <Empty icon="✓" title="Tudo concluído" text="Adicione uma nova tarefa para começar." />}
-          </div>
-          <button className="wideAction" onClick={enableNotifications}>🔔 Ativar notificações do navegador</button>
-        </section>}
-
-        {tab === 'agenda' && <section>
-          <PageHeader title="Agenda" subtitle="Compromissos e datas importantes" action={() => quickAction('event')} />
-          <div className="monthStrip"><span>{new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</span><b>{upcomingEvents.length} próximos</b></div>
-          <div className="list modernList agendaList">
-            {state.events.slice().sort((a, b) => a.event_date.localeCompare(b.event_date)).map((item) => <article key={item.id}><time><b>{new Date(`${item.event_date}T12:00:00`).getDate()}</b><span>{new Date(`${item.event_date}T12:00:00`).toLocaleDateString('pt-BR', { month: 'short' })}</span></time><div><b>{item.title}</b><small>{item.event_time || 'Dia todo'} • {item.category}</small></div><button className="remove" onClick={() => remove('events', item.id)}>×</button></article>)}
-            {!state.events.length && <Empty icon="▦" title="Agenda livre" text="Adicione seu primeiro compromisso." />}
-          </div>
-        </section>}
-
-        {tab === 'finance' && <section>
-          <PageHeader title="Finanças" subtitle="Controle simples e completo do mês" action={() => quickAction('transaction')} />
-          <div className="financeHero"><span>Saldo após contas pendentes</span><b className={balance < 0 ? 'negative' : ''}>{brl(balance)}</b><small>Atualizado automaticamente</small></div>
-          <div className="financeCards"><article><i>↑</i><div><span>Entradas</span><b>{brl(income)}</b></div></article><article><i>↓</i><div><span>Saídas</span><b>{brl(spent)}</b></div></article><article><i>!</i><div><span>Pendentes</span><b>{brl(pending)}</b></div></article></div>
-          {expenseByCategory.length > 0 && <><div className="sectionTitle"><div><h2>Maiores gastos</h2><p>Por categoria neste mês</p></div></div><div className="categoryBars">{expenseByCategory.map(([category, value]) => <div key={category}><header><span>{category}</span><b>{brl(value)}</b></header><i><span style={{ width: `${Math.min(100, spent ? (value / spent) * 100 : 0)}%` }} /></i></div>)}</div></>}
-          <div className="sectionTitle"><div><h2>Movimentações</h2><p>Entradas, gastos e contas</p></div></div>
-          <div className="list modernList financeList">
-            {state.transactions.slice().reverse().map((item) => <article key={item.id}><i className={item.type}>{item.type === 'income' ? '↑' : '↓'}</i><div><b>{item.description}</b><small>{item.category} • {formatDate(item.transaction_date)}{item.status === 'pending' ? ' • Pendente' : ''}</small></div><strong className={item.type}>{item.type === 'expense' ? '-' : '+'}{brl(Number(item.amount))}</strong><button className="remove" onClick={() => remove('transactions', item.id)}>×</button></article>)}
-            {!state.transactions.length && <Empty icon="R$" title="Sem movimentações" text="Cadastre salário, renda extra ou um gasto." />}
-          </div>
-        </section>}
-
-        {tab === 'car' && <section>
-          <PageHeader title="Meu carro" subtitle="Custos, abastecimentos e manutenção" action={() => quickAction(vehicle ? 'maintenance' : 'vehicle')} />
-          {!vehicle ? <div className="welcomeCard"><i>🚙</i><h2>Cadastre seu veículo</h2><p>Acompanhe quilometragem, combustível, documentos e manutenções.</p><button onClick={() => quickAction('vehicle')}>Cadastrar veículo</button></div> : <>
-            <article className="vehicleCard"><div><small>{vehicle.year}</small><h2>{vehicle.nickname}</h2><p>{vehicle.model}</p></div><div><span>Quilometragem</span><b>{vehicle.mileage.toLocaleString('pt-BR')} km</b></div></article>
-            <div className="carActions"><button onClick={() => quickAction('fuel')}><i>⛽</i><span>Abastecer</span></button><button onClick={() => quickAction('maintenance')}><i>🔧</i><span>Manutenção</span></button><button onClick={() => quickAction('vehicle')}><i>✎</i><span>Atualizar carro</span></button></div>
-            <div className="carStats"><article><span>Combustível no mês</span><b>{brl(state.fuel.filter((item) => item.entry_date.startsWith(currentMonth)).reduce((sum, item) => sum + Number(item.amount), 0))}</b></article><article><span>Manutenções</span><b>{state.maintenance.length}</b></article></div>
-            <div className="sectionTitle"><div><h2>Histórico do veículo</h2><p>Últimos registros</p></div></div>
-            <div className="list modernList">
-              {[...state.maintenance.map((item) => ({ ...item, kind: 'maintenance' as const, date: item.performed_date })), ...state.fuel.map((item) => ({ ...item, kind: 'fuel' as const, date: item.entry_date }))].sort((a, b) => b.date.localeCompare(a.date)).map((item) => item.kind === 'maintenance' ? <article key={item.id}><i className="historyIcon">🔧</i><div><b>{item.title}</b><small>{formatDate(item.performed_date)} • {brl(Number(item.cost))}</small></div><button className="remove" onClick={() => remove('maintenance', item.id)}>×</button></article> : <article key={item.id}><i className="historyIcon">⛽</i><div><b>Abastecimento</b><small>{formatDate(item.entry_date)} • {item.fuel_type}</small></div><strong>{brl(Number(item.amount))}</strong><button className="remove" onClick={() => remove('fuel', item.id)}>×</button></article>)}
-              {!state.maintenance.length && !state.fuel.length && <Empty icon="🚗" title="Sem histórico" text="Registre um abastecimento ou manutenção." />}
-            </div>
-          </>}
-        </section>}
-
-        {tab === 'market' && <section>
-          <PageHeader title="Mercado" subtitle="Lista rápida com controle de valores" action={() => quickAction('shopping')} />
-          <article className="marketSummary"><div><span>Lista atual</span><b>{openShopping.length} itens</b><small>Estimativa de {brl(openShopping.reduce((sum, item) => sum + Number(item.estimated_price || 0), 0))}</small></div><button disabled={!state.shopping.some((item) => item.purchased)} onClick={finishShopping}>Finalizar compra</button></article>
-          <div className="list modernList marketList">
-            {state.shopping.map((item) => <article className={item.purchased ? 'done' : ''} key={item.id}><button className="check" onClick={() => update((current) => ({ ...current, shopping: current.shopping.map((shopping) => shopping.id === item.id ? { ...shopping, purchased: !shopping.purchased } : shopping) }))}>{item.purchased ? '✓' : '○'}</button><div><b>{item.name}</b><small>{item.quantity} • {item.category}</small></div><strong>{item.estimated_price ? brl(Number(item.estimated_price)) : '—'}</strong><button className="remove" onClick={() => remove('shopping', item.id)}>×</button></article>)}
-            {!state.shopping.length && <Empty icon="🛒" title="Lista vazia" text="Adicione produtos para sua próxima compra." />}
-          </div>
-        </section>}
-      </main>
-
-      <button className="fab" onClick={() => quickAction(tab === 'tasks' ? 'task' : tab === 'finance' ? 'transaction' : tab === 'car' ? (vehicle ? 'fuel' : 'vehicle') : tab === 'market' ? 'shopping' : tab === 'agenda' ? 'event' : 'task')}>＋</button>
-      <nav>{nav.map(([id, label, icon]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}><b>{icon}</b><small>{label}</small></button>)}</nav>
-
-      {modal && <div className="modalShade" onClick={closeModal}><form className="modal" onSubmit={saveModal} onClick={(event) => event.stopPropagation()}>
-        <div className="modalHead"><div><h2>{modalTitle(modal)}</h2><p>{modalSubtitle(modal)}</p></div><button type="button" onClick={closeModal}>×</button></div>
-        <ModalFields kind={modal} draft={draft} setField={setField} />
-        <div className="modalActions"><button type="button" onClick={closeModal}>Cancelar</button><button type="submit">Salvar</button></div>
-      </form></div>}
-    </div>
-  )
+export default function App(){
+ const [s,setS]=useState<AppState>(emptyState),[tab,setTab]=useState<Tab>('home'),[ready,setReady]=useState(false),[menu,setMenu]=useState(false)
+ const [modal,setModal]=useState<Kind>(null),[draft,setDraft]=useState<Draft>({}),[period,setPeriod]=useState<Period>('month')
+ useEffect(()=>{loadState().then(x=>{setS(x);setReady(true)})},[])
+ useEffect(()=>{if(!ready)return;const t=setTimeout(()=>persistState(s),300);return()=>clearTimeout(t)},[s,ready])
+ const up=(fn:(x:AppState)=>AppState)=>setS(x=>fn(x)),month=today().slice(0,7),week=startOfWeek()
+ const periodTx=s.transactions.filter(x=>period==='all'||(period==='month'?x.transaction_date.startsWith(month):x.transaction_date>=week&&x.transaction_date<=today()))
+ const monthTx=s.transactions.filter(x=>x.transaction_date.startsWith(month))
+ const sums=(list:typeof s.transactions)=>({
+  income:list.filter(x=>x.type==='income'&&x.status==='paid').reduce((a,x)=>a+Number(x.amount),0)+(period==='month'?Number(s.settings.monthly_salary||0):0),
+  spent:list.filter(x=>x.type==='expense'&&x.status==='paid').reduce((a,x)=>a+Number(x.amount),0),
+  pending:list.filter(x=>x.type==='expense'&&x.status==='pending').reduce((a,x)=>a+Number(x.amount),0)
+ })
+ const p=sums(periodTx),m=sums(monthTx),balance=m.income-m.spent-m.pending,commitment=m.income?((m.spent+m.pending)/m.income)*100:0
+ const risk=balance<0?'red':commitment>=85?'warning':'safe'
+ const due=s.tasks.filter(x=>!x.completed&&x.due_date===today()),events=s.events.filter(x=>x.event_date>=today()).sort((a,b)=>a.event_date.localeCompare(b.event_date)),shopping=s.shopping.filter(x=>!x.purchased),vehicle=s.vehicles[0]
+ const categories=useMemo(()=>{const map=new Map<string,number>();periodTx.filter(x=>x.type==='expense').forEach(x=>map.set(x.category,(map.get(x.category)||0)+Number(x.amount)));return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5)},[periodTx])
+ if(!ready)return <div className="load"><i>D</i><b>Preparando o DHub</b><span>Carregando sua rotina...</span></div>
+ const open=(k:Kind,d:Draft={})=>{setModal(k);setDraft(d)},close=()=>{setModal(null);setDraft({})},field=(k:string,v:string)=>setDraft(x=>({...x,[k]:v}))
+ const remove=(k:'tasks'|'events'|'transactions'|'maintenance'|'fuel'|'shopping',id:string)=>{if(confirm('Excluir este registro?'))up(x=>({...x,[k]:x[k].filter(i=>i.id!==id)} as AppState))}
+ const toggle=(id:string)=>up(x=>({...x,tasks:x.tasks.map(i=>i.id===id?{...i,completed:!i.completed}:i)}))
+ const defaults=(k:Kind):Draft=>k==='task'?{date:today(),priority:'media',category:'Pessoal'}:k==='event'?{date:today(),category:'Pessoal'}:k==='transaction'?{type:'expense',date:today(),status:'paid',category:'Outros',extra:'no',fixed:'no'}:k==='fuel'?{date:today(),fuelType:'Gasolina',mileage:String(vehicle?.mileage||''),finance:'yes'}:k==='maintenance'?{date:today(),mileage:String(vehicle?.mileage||''),finance:'yes'}:k==='shopping'?{quantity:'1 un.',category:'Alimentos'}:{}
+ const add=(k:Kind)=>{if((k==='fuel'||k==='maintenance')&&!vehicle)return open('vehicle',{nickname:'Minha Spin',model:'Chevrolet Spin',year:'2014',mileage:'270000'});open(k,defaults(k))}
+ const edit=(k:Exclude<Kind,null>,item:any)=>open(k,{editId:item.id,title:item.title||'',description:item.description||'',name:item.name||'',date:item.due_date||item.event_date||item.transaction_date||item.entry_date||item.performed_date||'',time:item.due_time||item.event_time||'',category:item.category||'',priority:item.priority||'',type:item.type||'',status:item.status||'',amount:String(item.amount??item.cost??item.estimated_price??''),nickname:item.nickname||'',model:item.model||'',year:item.year||'',mileage:String(item.mileage??item.performed_mileage??''),quantity:item.quantity||'',fuelType:item.fuel_type||'',liters:String(item.liters??''),nextDate:item.next_date||'',nextMileage:String(item.next_mileage??''),finance:'no',notes:item.notes||''})
+ function save(e:FormEvent){e.preventDefault();if(!modal)return;const id=draft.editId
+  if(modal==='task'&&draft.title)up(x=>({...x,tasks:id?x.tasks.map(i=>i.id===id?{...i,title:draft.title,due_date:draft.date||null,due_time:draft.time||null,category:draft.category||'Pessoal',priority:(draft.priority as any)||'media'}:i):[...x.tasks,makeTask({title:draft.title,due_date:draft.date||today(),due_time:draft.time||null,category:draft.category||'Pessoal',priority:(draft.priority as any)||'media'})]}))
+  if(modal==='event'&&draft.title)up(x=>({...x,events:id?x.events.map(i=>i.id===id?{...i,title:draft.title,event_date:draft.date||today(),event_time:draft.time||null,category:draft.category||'Pessoal',notes:draft.notes||''}:i):[...x.events,makeEvent({title:draft.title,event_date:draft.date||today(),event_time:draft.time||null,category:draft.category||'Pessoal',notes:draft.notes||''})]}))
+  if(modal==='transaction'&&draft.description)up(x=>({...x,transactions:id?x.transactions.map(i=>i.id===id?{...i,type:draft.type==='income'?'income':'expense',description:draft.description,amount:num(draft.amount),category:draft.category||'Outros',transaction_date:draft.date||today(),status:draft.status==='pending'?'pending':'paid',is_extra:draft.extra==='yes',is_fixed:draft.fixed==='yes'}:i):[...x.transactions,makeTransaction({type:draft.type==='income'?'income':'expense',description:draft.description,amount:num(draft.amount),category:draft.category||'Outros',transaction_date:draft.date||today(),status:draft.status==='pending'?'pending':'paid',is_extra:draft.extra==='yes',is_fixed:draft.fixed==='yes'})]}))
+  if(modal==='vehicle'&&draft.nickname)up(x=>({...x,vehicles:[id&&vehicle?{...vehicle,nickname:draft.nickname,model:draft.model||'Veículo',year:draft.year||'',mileage:num(draft.mileage)}:makeVehicle({nickname:draft.nickname,model:draft.model||'Veículo',year:draft.year||'',mileage:num(draft.mileage)})]}))
+  if(modal==='shopping'&&draft.name)up(x=>({...x,shopping:id?x.shopping.map(i=>i.id===id?{...i,name:draft.name,quantity:draft.quantity||'1 un.',category:draft.category||'Alimentos',estimated_price:draft.amount?num(draft.amount):null}:i):[...x.shopping,makeShopping({name:draft.name,quantity:draft.quantity||'1 un.',category:draft.category||'Alimentos',estimated_price:draft.amount?num(draft.amount):null})]}))
+  if(modal==='fuel'&&vehicle){const amount=num(draft.amount);up(x=>({...x,fuel:id?x.fuel.map(i=>i.id===id?{...i,amount,liters:draft.liters?num(draft.liters):null,mileage:draft.mileage?num(draft.mileage):vehicle.mileage,fuel_type:draft.fuelType||'Gasolina',entry_date:draft.date||today()}:i):[...x.fuel,makeFuel({vehicle_id:vehicle.id,amount,liters:draft.liters?num(draft.liters):null,mileage:draft.mileage?num(draft.mileage):vehicle.mileage,fuel_type:draft.fuelType||'Gasolina',entry_date:draft.date||today()})],transactions:!id&&draft.finance!=='no'?[...x.transactions,makeTransaction({type:'expense',description:'Abastecimento',amount,category:'Carro - Combustível',source:'car',transaction_date:draft.date||today()})]:x.transactions}))}
+  if(modal==='maintenance'&&vehicle&&draft.title){const cost=num(draft.amount);up(x=>({...x,maintenance:id?x.maintenance.map(i=>i.id===id?{...i,title:draft.title,cost,performed_date:draft.date||today(),performed_mileage:num(draft.mileage),next_date:draft.nextDate||null,next_mileage:draft.nextMileage?num(draft.nextMileage):null,notes:draft.notes||''}:i):[...x.maintenance,makeMaintenance({vehicle_id:vehicle.id,title:draft.title,cost,performed_date:draft.date||today(),performed_mileage:num(draft.mileage),next_date:draft.nextDate||null,next_mileage:draft.nextMileage?num(draft.nextMileage):null,notes:draft.notes||''})],transactions:!id&&draft.finance!=='no'&&cost>0?[...x.transactions,makeTransaction({type:'expense',description:draft.title,amount:cost,category:'Carro - Manutenção',source:'car',transaction_date:draft.date||today()})]:x.transactions}))}
+  if(modal==='settings')up(x=>({...x,settings:{...x.settings,display_name:draft.name||x.settings.display_name,monthly_salary:num(draft.salary),payday:Math.min(31,Math.max(1,num(draft.payday)||1))}}));close()
+ }
+ const finish=()=>{const bought=s.shopping.filter(x=>x.purchased);if(!bought.length)return;const total=bought.reduce((a,x)=>a+Number(x.actual_price||x.estimated_price||0),0),register=confirm(`Compra de ${brl(total)}. Registrar nas Finanças?`);up(x=>({...x,shopping:x.shopping.filter(i=>!i.purchased),transactions:register?[...x.transactions,makeTransaction({type:'expense',description:'Compra de mercado',amount:total,category:'Alimentação',source:'market'})]:x.transactions}))}
+ return <div className="app">
+  <header><button className="iconButton" onClick={()=>setMenu(true)}>☰</button><div className="brand"><b>DHub</b><small><i className={hasSupabase?'online':''}/>{hasSupabase?'Sincronizado':'Modo local'}</small></div><button className="avatar" onClick={()=>open('settings',{name:s.settings.display_name,salary:String(s.settings.monthly_salary),payday:String(s.settings.payday)})}>{s.settings.display_name[0]?.toUpperCase()}</button></header>
+  {menu&&<div className="shade" onClick={()=>setMenu(false)}><aside onClick={e=>e.stopPropagation()}><div className="menuHead"><span>D</span><div><b>DHub</b><small>Sua vida organizada</small></div></div>{[...nav,['agenda','Agenda','▦'] as [Tab,string,string]].map(([id,l,i])=><button key={id} className={tab===id?'on':''} onClick={()=>{setTab(id);setMenu(false)}}><b>{i}</b>{l}<span>›</span></button>)}</aside></div>}
+  <main>
+   {tab==='home'&&<section><div className="hero"><div><span>{new Date().getHours()<12?'Bom dia':new Date().getHours()<18?'Boa tarde':'Boa noite'},</span><h1>{s.settings.display_name} 👋</h1><p>{new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</p></div></div><article className="balanceCard"><div><span>Saldo previsto do mês</span><b className={balance<0?'negative':''}>{brl(balance)}</b><small>{brl(m.income)} em entradas</small></div><div className="balanceMeta"><span>{brl(m.spent)} gastos</span><span>{brl(m.pending)} pendentes</span></div></article><FinancialAlert risk={risk} balance={balance} commitment={commitment}/><div className="quickActions"><button onClick={()=>add('task')}><i>✓</i><span>Tarefa</span></button><button onClick={()=>add('transaction')}><i>R$</i><span>Movimentação</span></button><button onClick={()=>add('event')}><i>▦</i><span>Agenda</span></button><button onClick={()=>add('shopping')}><i>🛒</i><span>Mercado</span></button></div><Title t="Visão geral" s="O que precisa da sua atenção"/><div className="overviewGrid"><button onClick={()=>setTab('tasks')}><i>✓</i><div><b>{due.length}</b><span>Tarefas hoje</span><small>{s.tasks.filter(x=>!x.completed).length} pendentes</small></div></button><button onClick={()=>setTab('agenda')}><i>▦</i><div><b>{events.length}</b><span>Agenda</span><small>{events[0]?date(events[0].event_date):'Livre'}</small></div></button><button onClick={()=>setTab('market')}><i>🛒</i><div><b>{shopping.length}</b><span>Mercado</span><small>{brl(shopping.reduce((a,x)=>a+Number(x.estimated_price||0),0))}</small></div></button><button onClick={()=>setTab('car')}><i>🚗</i><div><b>{vehicle?vehicle.mileage.toLocaleString('pt-BR'):'0'}</b><span>Quilometragem</span><small>{s.maintenance.length} manutenções</small></div></button></div><Title t="Seu dia" s="Prioridades de hoje"/><Scroll>{due.map(x=><Row key={x.id} main={x.title} sub={`${x.due_time||'Durante o dia'} • ${x.category}`} start={<button className="check" onClick={()=>toggle(x.id)}>○</button>}/>) }{!due.length&&<Empty i="✓" t="Dia organizado" s="Nenhuma tarefa para hoje."/>}</Scroll></section>}
+   {tab==='tasks'&&<section><Page title="Tarefas" sub="Organize prioridades e prazos" add={()=>add('task')}/><Scroll>{s.tasks.map(x=><Row key={x.id} cls={x.completed?'done':''} main={x.title} sub={`${date(x.due_date)} • ${x.category}`} start={<button className="check" onClick={()=>toggle(x.id)}>{x.completed?'✓':'○'}</button>} actions={<Actions edit={()=>edit('task',x)} del={()=>remove('tasks',x.id)}/>}/>) }{!s.tasks.length&&<Empty i="✓" t="Sem tarefas" s="Adicione sua primeira tarefa."/>}</Scroll></section>}
+   {tab==='agenda'&&<section><Page title="Agenda" sub="Compromissos e datas importantes" add={()=>add('event')}/><Scroll>{s.events.slice().sort((a,b)=>a.event_date.localeCompare(b.event_date)).map(x=><Row key={x.id} main={x.title} sub={`${date(x.event_date)} • ${x.event_time||'Dia todo'} • ${x.category}`} start={<i className="rowIcon">▦</i>} actions={<Actions edit={()=>edit('event',x)} del={()=>remove('events',x.id)}/>}/>) }{!s.events.length&&<Empty i="▦" t="Agenda livre" s="Adicione um compromisso."/>}</Scroll></section>}
+   {tab==='finance'&&<section><Page title="Finanças" sub="Visão semanal, mensal ou completa" add={()=>add('transaction')}/><div className="period"><button className={period==='week'?'on':''} onClick={()=>setPeriod('week')}>Semana</button><button className={period==='month'?'on':''} onClick={()=>setPeriod('month')}>Mês</button><button className={period==='all'?'on':''} onClick={()=>setPeriod('all')}>Tudo</button></div><FinancialAlert risk={risk} balance={balance} commitment={commitment}/><div className="financeCards"><article><span>Entradas</span><b>{brl(p.income)}</b></article><article><span>Saídas</span><b>{brl(p.spent)}</b></article><article><span>Pendentes</span><b>{brl(p.pending)}</b></article></div>{categories.length>0&&<><Title t="Gastos por categoria" s={period==='week'?'Nesta semana':period==='month'?'Neste mês':'Em todo o período'}/><div className="categoryBars">{categories.map(([c,v])=><div key={c}><header><span>{c}</span><b>{brl(v)}</b></header><i><span style={{width:`${Math.min(100,p.spent?v/p.spent*100:0)}%`}}/></i></div>)}</div></>}<Title t="Movimentações" s={`${periodTx.length} registros`}/><Scroll>{periodTx.slice().reverse().map(x=><Row key={x.id} main={x.description} sub={`${x.category} • ${date(x.transaction_date)}${x.status==='pending'?' • Pendente':''}`} start={<i className={`moneyIcon ${x.type}`}>{x.type==='income'?'↑':'↓'}</i>} value={`${x.type==='expense'?'-':'+'}${brl(Number(x.amount))}`} actions={<Actions edit={()=>edit('transaction',x)} del={()=>remove('transactions',x.id)}/>}/>) }{!periodTx.length&&<Empty i="R$" t="Sem movimentações" s="Adicione uma entrada ou gasto."/>}</Scroll></section>}
+   {tab==='car'&&<section><Page title="Meu carro" sub="Combustível e manutenções" add={()=>add(vehicle?'maintenance':'vehicle')}/>{!vehicle?<Empty i="🚙" t="Cadastre seu veículo" s="Comece a acompanhar os custos." action={()=>add('vehicle')}/>:<><article className="vehicleCard"><div><small>{vehicle.year}</small><h2>{vehicle.nickname}</h2><p>{vehicle.model}</p></div><div><span>Quilometragem</span><b>{vehicle.mileage.toLocaleString('pt-BR')} km</b></div></article><div className="carActions"><button onClick={()=>add('fuel')}>⛽ Abastecer</button><button onClick={()=>add('maintenance')}>🔧 Manutenção</button><button onClick={()=>edit('vehicle',vehicle)}>✎ Editar carro</button></div><Title t="Histórico" s="Registros mais recentes"/><Scroll>{[...s.maintenance.map(x=>({...x,kind:'maintenance',d:x.performed_date})),...s.fuel.map(x=>({...x,kind:'fuel',d:x.entry_date}))].sort((a,b)=>b.d.localeCompare(a.d)).map((x:any)=>x.kind==='maintenance'?<Row key={x.id} main={x.title} sub={`${date(x.performed_date)} • ${brl(Number(x.cost))}`} start={<i className="rowIcon">🔧</i>} actions={<Actions edit={()=>edit('maintenance',x)} del={()=>remove('maintenance',x.id)}/>}/>:<Row key={x.id} main="Abastecimento" sub={`${date(x.entry_date)} • ${x.fuel_type}`} value={brl(Number(x.amount))} start={<i className="rowIcon">⛽</i>} actions={<Actions edit={()=>edit('fuel',x)} del={()=>remove('fuel',x.id)}/>}/>) }{!s.maintenance.length&&!s.fuel.length&&<Empty i="🚗" t="Sem histórico" s="Registre um abastecimento ou manutenção."/>}</Scroll></>}</section>}
+   {tab==='market'&&<section><Page title="Mercado" sub="Lista de compras e valores" add={()=>add('shopping')}/><article className="marketSummary"><div><span>Lista atual</span><b>{shopping.length} itens</b><small>{brl(shopping.reduce((a,x)=>a+Number(x.estimated_price||0),0))} estimados</small></div><button disabled={!s.shopping.some(x=>x.purchased)} onClick={finish}>Finalizar</button></article><Scroll>{s.shopping.map(x=><Row key={x.id} cls={x.purchased?'done':''} main={x.name} sub={`${x.quantity} • ${x.category}`} value={x.estimated_price?brl(Number(x.estimated_price)):'—'} start={<button className="check" onClick={()=>up(a=>({...a,shopping:a.shopping.map(i=>i.id===x.id?{...i,purchased:!i.purchased}:i)}))}>{x.purchased?'✓':'○'}</button>} actions={<Actions edit={()=>edit('shopping',x)} del={()=>remove('shopping',x.id)}/>}/>) }{!s.shopping.length&&<Empty i="🛒" t="Lista vazia" s="Adicione um produto."/>}</Scroll></section>}
+  </main><button className="fab" onClick={()=>add(tab==='finance'?'transaction':tab==='car'?(vehicle?'fuel':'vehicle'):tab==='market'?'shopping':tab==='agenda'?'event':'task')}>＋</button><nav>{nav.map(([id,l,i])=><button key={id} className={tab===id?'on':''} onClick={()=>setTab(id)}><b>{i}</b><small>{l}</small></button>)}</nav>
+  {modal&&<div className="modalShade" onClick={close}><form className="modal" onSubmit={save} onClick={e=>e.stopPropagation()}><div className="modalHead"><div><h2>{draft.editId?'Editar':'Novo'} {label(modal)}</h2><p>Preencha e salve.</p></div><button type="button" onClick={close}>×</button></div><Fields kind={modal} d={draft} set={field}/><div className="modalActions"><button type="button" onClick={close}>Cancelar</button><button type="submit">Salvar</button></div></form></div>}
+ </div>
 }
-
-function PageHeader({ title, subtitle, action }: { title: string; subtitle: string; action: () => void }) {
-  return <div className="pageHeader"><div><h1>{title}</h1><p>{subtitle}</p></div><button onClick={action}>＋</button></div>
-}
-
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
-  return <div className="emptyState"><i>{icon}</i><b>{title}</b><span>{text}</span></div>
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="field"><span>{label}</span>{children}</label>
-}
-
-function ModalFields({ kind, draft, setField }: { kind: Exclude<ModalKind, null>; draft: Draft; setField: (name: string, value: string) => void }) {
-  if (kind === 'task') return <><Field label="Tarefa"><input required value={draft.title || ''} onChange={(e) => setField('title', e.target.value)} placeholder="Ex.: Preparar aula de Excel" autoFocus /></Field><div className="fieldGrid"><Field label="Data"><input type="date" value={draft.date || ''} onChange={(e) => setField('date', e.target.value)} /></Field><Field label="Horário"><input type="time" value={draft.time || ''} onChange={(e) => setField('time', e.target.value)} /></Field></div><div className="fieldGrid"><Field label="Categoria"><input value={draft.category || ''} onChange={(e) => setField('category', e.target.value)} /></Field><Field label="Prioridade"><select value={draft.priority || 'media'} onChange={(e) => setField('priority', e.target.value)}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option></select></Field></div></>
-  if (kind === 'event') return <><Field label="Compromisso"><input required value={draft.title || ''} onChange={(e) => setField('title', e.target.value)} placeholder="Ex.: Consulta médica" autoFocus /></Field><div className="fieldGrid"><Field label="Data"><input type="date" value={draft.date || ''} onChange={(e) => setField('date', e.target.value)} /></Field><Field label="Horário"><input type="time" value={draft.time || ''} onChange={(e) => setField('time', e.target.value)} /></Field></div><Field label="Categoria"><input value={draft.category || ''} onChange={(e) => setField('category', e.target.value)} /></Field><Field label="Observações"><textarea value={draft.notes || ''} onChange={(e) => setField('notes', e.target.value)} /></Field></>
-  if (kind === 'transaction') return <><div className="segmented"><button type="button" className={draft.type !== 'income' ? 'active' : ''} onClick={() => setField('type', 'expense')}>Saída</button><button type="button" className={draft.type === 'income' ? 'active' : ''} onClick={() => setField('type', 'income')}>Entrada</button></div><Field label="Descrição"><input required value={draft.description || ''} onChange={(e) => setField('description', e.target.value)} placeholder="Ex.: Internet, salário, renda extra" autoFocus /></Field><div className="fieldGrid"><Field label="Valor"><input inputMode="decimal" value={draft.amount || ''} onChange={(e) => setField('amount', e.target.value)} placeholder="0,00" /></Field><Field label="Data"><input type="date" value={draft.date || ''} onChange={(e) => setField('date', e.target.value)} /></Field></div><Field label="Categoria"><input value={draft.category || ''} onChange={(e) => setField('category', e.target.value)} /></Field><div className="fieldGrid"><Field label="Situação"><select value={draft.status || 'paid'} onChange={(e) => setField('status', e.target.value)}><option value="paid">Pago/recebido</option><option value="pending">Pendente</option></select></Field><Field label="Tipo"><select value={draft.extra || 'no'} onChange={(e) => setField('extra', e.target.value)}><option value="no">Normal</option><option value="yes">Extra</option></select></Field></div></>
-  if (kind === 'vehicle') return <><Field label="Apelido do veículo"><input required value={draft.nickname || ''} onChange={(e) => setField('nickname', e.target.value)} placeholder="Minha Spin" autoFocus /></Field><Field label="Modelo"><input value={draft.model || ''} onChange={(e) => setField('model', e.target.value)} placeholder="Chevrolet Spin" /></Field><div className="fieldGrid"><Field label="Ano"><input value={draft.year || ''} onChange={(e) => setField('year', e.target.value)} /></Field><Field label="Quilometragem"><input inputMode="numeric" value={draft.mileage || ''} onChange={(e) => setField('mileage', e.target.value)} /></Field></div></>
-  if (kind === 'fuel') return <><Field label="Valor abastecido"><input inputMode="decimal" value={draft.amount || ''} onChange={(e) => setField('amount', e.target.value)} placeholder="0,00" autoFocus /></Field><div className="fieldGrid"><Field label="Combustível"><select value={draft.fuelType || 'Gasolina'} onChange={(e) => setField('fuelType', e.target.value)}><option>Gasolina</option><option>Etanol</option><option>Diesel</option><option>GNV</option></select></Field><Field label="Litros"><input inputMode="decimal" value={draft.liters || ''} onChange={(e) => setField('liters', e.target.value)} /></Field></div><div className="fieldGrid"><Field label="Quilometragem"><input inputMode="numeric" value={draft.mileage || ''} onChange={(e) => setField('mileage', e.target.value)} /></Field><Field label="Data"><input type="date" value={draft.date || ''} onChange={(e) => setField('date', e.target.value)} /></Field></div><Field label="Enviar para Finanças?"><select value={draft.finance || 'yes'} onChange={(e) => setField('finance', e.target.value)}><option value="yes">Sim, eu paguei</option><option value="no">Não, outra pessoa pagou</option></select></Field></>
-  if (kind === 'maintenance') return <><Field label="Manutenção"><input required value={draft.title || ''} onChange={(e) => setField('title', e.target.value)} placeholder="Troca de óleo" autoFocus /></Field><div className="fieldGrid"><Field label="Valor"><input inputMode="decimal" value={draft.amount || ''} onChange={(e) => setField('amount', e.target.value)} /></Field><Field label="Data"><input type="date" value={draft.date || ''} onChange={(e) => setField('date', e.target.value)} /></Field></div><div className="fieldGrid"><Field label="Km atual"><input inputMode="numeric" value={draft.mileage || ''} onChange={(e) => setField('mileage', e.target.value)} /></Field><Field label="Próxima em km"><input inputMode="numeric" value={draft.nextMileage || ''} onChange={(e) => setField('nextMileage', e.target.value)} /></Field></div><Field label="Próxima data"><input type="date" value={draft.nextDate || ''} onChange={(e) => setField('nextDate', e.target.value)} /></Field><Field label="Enviar para Finanças?"><select value={draft.finance || 'yes'} onChange={(e) => setField('finance', e.target.value)}><option value="yes">Sim, eu paguei</option><option value="no">Não, outra pessoa pagou</option></select></Field></>
-  if (kind === 'shopping') return <><Field label="Produto"><input required value={draft.name || ''} onChange={(e) => setField('name', e.target.value)} placeholder="Ex.: Arroz" autoFocus /></Field><div className="fieldGrid"><Field label="Quantidade"><input value={draft.quantity || ''} onChange={(e) => setField('quantity', e.target.value)} /></Field><Field label="Preço estimado"><input inputMode="decimal" value={draft.amount || ''} onChange={(e) => setField('amount', e.target.value)} /></Field></div><Field label="Categoria"><select value={draft.category || 'Alimentos'} onChange={(e) => setField('category', e.target.value)}><option>Alimentos</option><option>Bebidas</option><option>Limpeza</option><option>Higiene</option><option>Farmácia</option><option>Casa</option><option>Outros</option></select></Field></>
-  return <><Field label="Seu nome"><input value={draft.name || ''} onChange={(e) => setField('name', e.target.value)} autoFocus /></Field><div className="fieldGrid"><Field label="Salário mensal"><input inputMode="decimal" value={draft.salary || ''} onChange={(e) => setField('salary', e.target.value)} /></Field><Field label="Dia do pagamento"><input inputMode="numeric" min="1" max="31" value={draft.payday || ''} onChange={(e) => setField('payday', e.target.value)} /></Field></div></>
-}
-
-function modalTitle(kind: Exclude<ModalKind, null>) {
-  return ({ task: 'Nova tarefa', event: 'Novo compromisso', transaction: 'Nova movimentação', vehicle: 'Meu veículo', fuel: 'Novo abastecimento', maintenance: 'Nova manutenção', shopping: 'Adicionar ao mercado', settings: 'Configurações' } as Record<string, string>)[kind]
-}
-
-function modalSubtitle(kind: Exclude<ModalKind, null>) {
-  return ({ task: 'Adicione uma prioridade à sua rotina.', event: 'Reserve uma data importante.', transaction: 'Registre entradas, saídas ou contas.', vehicle: 'Dados básicos do seu carro.', fuel: 'Controle combustível e custo mensal.', maintenance: 'Acompanhe serviços e próximas revisões.', shopping: 'Monte sua lista de compras.', settings: 'Personalize sua experiência.' } as Record<string, string>)[kind]
-}
+function FinancialAlert({risk,balance,commitment}:{risk:string,balance:number,commitment:number}){return <article className={`financialAlert ${risk}`}><i>{risk==='red'?'!':risk==='warning'?'⚠':'✓'}</i><div><b>{risk==='red'?'Você está no vermelho':risk==='warning'?'Atenção aos gastos':'Finanças sob controle'}</b><span>{risk==='red'?`Faltam ${brl(Math.abs(balance))} para equilibrar o mês.`:risk==='warning'?`${commitment.toFixed(0)}% da renda já está comprometida.`:`${commitment.toFixed(0)}% da renda comprometida neste mês.`}</span></div></article>}
+function Page({title,sub,add}:{title:string,sub:string,add:()=>void}){return <div className="pageHeader"><div><h1>{title}</h1><p>{sub}</p></div><button onClick={add}>＋</button></div>}
+function Title({t,s}:{t:string,s:string}){return <div className="sectionTitle"><div><h2>{t}</h2><p>{s}</p></div></div>}
+function Scroll({children}:{children:React.ReactNode}){return <div className="scrollList">{children}</div>}
+function Row({main,sub,start,value,actions,cls=''}:{main:string,sub:string,start?:React.ReactNode,value?:string,actions?:React.ReactNode,cls?:string}){return <article className={`row ${cls}`}>{start}<div><b>{main}</b><small>{sub}</small></div>{value&&<strong>{value}</strong>}{actions}</article>}
+function Actions({edit,del}:{edit:()=>void,del:()=>void}){return <div className="actions"><button onClick={edit} title="Editar">✎</button><button onClick={del} title="Excluir">×</button></div>}
+function Empty({i,t,s,action}:{i:string,t:string,s:string,action?:()=>void}){return <div className="emptyState"><i>{i}</i><b>{t}</b><span>{s}</span>{action&&<button onClick={action}>Adicionar</button>}</div>}
+function F({l,children}:{l:string,children:React.ReactNode}){return <label className="field"><span>{l}</span>{children}</label>}
+function Fields({kind,d,set}:{kind:Exclude<Kind,null>,d:Draft,set:(k:string,v:string)=>void}){if(kind==='task')return <><F l="Tarefa"><input required value={d.title||''} onChange={e=>set('title',e.target.value)}/></F><Grid><F l="Data"><input type="date" value={d.date||''} onChange={e=>set('date',e.target.value)}/></F><F l="Horário"><input type="time" value={d.time||''} onChange={e=>set('time',e.target.value)}/></F></Grid><Grid><F l="Categoria"><input value={d.category||''} onChange={e=>set('category',e.target.value)}/></F><F l="Prioridade"><select value={d.priority||'media'} onChange={e=>set('priority',e.target.value)}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option></select></F></Grid></>;if(kind==='event')return <><F l="Compromisso"><input required value={d.title||''} onChange={e=>set('title',e.target.value)}/></F><Grid><F l="Data"><input type="date" value={d.date||''} onChange={e=>set('date',e.target.value)}/></F><F l="Horário"><input type="time" value={d.time||''} onChange={e=>set('time',e.target.value)}/></F></Grid><F l="Categoria"><input value={d.category||''} onChange={e=>set('category',e.target.value)}/></F></>;if(kind==='transaction')return <><div className="segmented"><button type="button" className={d.type!=='income'?'on':''} onClick={()=>set('type','expense')}>Saída</button><button type="button" className={d.type==='income'?'on':''} onClick={()=>set('type','income')}>Entrada</button></div><F l="Descrição"><input required value={d.description||''} onChange={e=>set('description',e.target.value)}/></F><Grid><F l="Valor"><input inputMode="decimal" value={d.amount||''} onChange={e=>set('amount',e.target.value)}/></F><F l="Data"><input type="date" value={d.date||''} onChange={e=>set('date',e.target.value)}/></F></Grid><Grid><F l="Categoria"><input value={d.category||''} onChange={e=>set('category',e.target.value)}/></F><F l="Situação"><select value={d.status||'paid'} onChange={e=>set('status',e.target.value)}><option value="paid">Pago/recebido</option><option value="pending">Pendente</option></select></F></Grid></>;if(kind==='vehicle')return <><F l="Apelido"><input required value={d.nickname||''} onChange={e=>set('nickname',e.target.value)}/></F><F l="Modelo"><input value={d.model||''} onChange={e=>set('model',e.target.value)}/></F><Grid><F l="Ano"><input value={d.year||''} onChange={e=>set('year',e.target.value)}/></F><F l="Quilometragem"><input value={d.mileage||''} onChange={e=>set('mileage',e.target.value)}/></F></Grid></>;if(kind==='shopping')return <><F l="Produto"><input required value={d.name||''} onChange={e=>set('name',e.target.value)}/></F><Grid><F l="Quantidade"><input value={d.quantity||''} onChange={e=>set('quantity',e.target.value)}/></F><F l="Preço"><input inputMode="decimal" value={d.amount||''} onChange={e=>set('amount',e.target.value)}/></F></Grid><F l="Categoria"><input value={d.category||''} onChange={e=>set('category',e.target.value)}/></F></>;if(kind==='fuel')return <><Grid><F l="Valor"><input value={d.amount||''} onChange={e=>set('amount',e.target.value)}/></F><F l="Litros"><input value={d.liters||''} onChange={e=>set('liters',e.target.value)}/></F></Grid><Grid><F l="Combustível"><select value={d.fuelType||'Gasolina'} onChange={e=>set('fuelType',e.target.value)}><option>Gasolina</option><option>Etanol</option><option>Diesel</option><option>GNV</option></select></F><F l="Data"><input type="date" value={d.date||''} onChange={e=>set('date',e.target.value)}/></F></Grid><F l="Quilometragem"><input value={d.mileage||''} onChange={e=>set('mileage',e.target.value)}/></F>{!d.editId&&<F l="Registrar nas Finanças?"><select value={d.finance||'yes'} onChange={e=>set('finance',e.target.value)}><option value="yes">Sim</option><option value="no">Não</option></select></F>}</>;if(kind==='maintenance')return <><F l="Manutenção"><input required value={d.title||''} onChange={e=>set('title',e.target.value)}/></F><Grid><F l="Valor"><input value={d.amount||''} onChange={e=>set('amount',e.target.value)}/></F><F l="Data"><input type="date" value={d.date||''} onChange={e=>set('date',e.target.value)}/></F></Grid><Grid><F l="Km atual"><input value={d.mileage||''} onChange={e=>set('mileage',e.target.value)}/></F><F l="Próxima km"><input value={d.nextMileage||''} onChange={e=>set('nextMileage',e.target.value)}/></F></Grid>{!d.editId&&<F l="Registrar nas Finanças?"><select value={d.finance||'yes'} onChange={e=>set('finance',e.target.value)}><option value="yes">Sim</option><option value="no">Não</option></select></F>}</>;return <><F l="Seu nome"><input value={d.name||''} onChange={e=>set('name',e.target.value)}/></F><Grid><F l="Salário mensal"><input value={d.salary||''} onChange={e=>set('salary',e.target.value)}/></F><F l="Dia do pagamento"><input value={d.payday||''} onChange={e=>set('payday',e.target.value)}/></F></Grid></>}
+function Grid({children}:{children:React.ReactNode}){return <div className="fieldGrid">{children}</div>}
+function label(k:Exclude<Kind,null>){return ({task:'tarefa',event:'compromisso',transaction:'movimentação',vehicle:'veículo',fuel:'abastecimento',maintenance:'manutenção',shopping:'produto',settings:'configurações'} as Record<string,string>)[k]}
