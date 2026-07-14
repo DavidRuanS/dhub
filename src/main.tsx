@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import AuthGate from './AuthGate'
 import WalletEnhancer from './WalletEnhancer'
+import AgendaVoiceEnhancer from './AgendaVoiceEnhancer'
 import './styles.css'
 import './overrides.css'
 
@@ -12,5 +13,5 @@ if ('serviceWorker' in navigator) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><AuthGate /><WalletEnhancer /></StrictMode>,
+  <StrictMode><AuthGate /><WalletEnhancer /><AgendaVoiceEnhancer /></StrictMode>,
 )
