@@ -1,20 +1,8 @@
--- DHub - banco inicial
--- Execute todo este arquivo em Supabase > SQL Editor > New query > Run.
--- Depois habilite Anonymous Sign-Ins em Authentication > Providers > Anonymous.
+-- DHub - banco inicial corrigido
+-- Pode executar mesmo que a tentativa anterior tenha criado algumas tabelas.
+-- Nao traduza o codigo SQL no navegador.
 
 create extension if not exists pgcrypto;
-
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-security invoker
-set search_path = public
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
 
 create table if not exists public.user_settings (
   id uuid primary key default auth.uid(),
@@ -128,25 +116,77 @@ create index if not exists maintenance_vehicle_idx on public.vehicle_maintenance
 create index if not exists fuel_vehicle_idx on public.fuel_entries(vehicle_id, entry_date);
 create index if not exists shopping_user_status_idx on public.shopping_items(user_id, purchased);
 
-do $$
-declare t text;
-begin
-  foreach t in array array['user_settings','tasks','events','transactions','vehicles','vehicle_maintenance','fuel_entries','shopping_items']
-  loop
-    execute format('drop trigger if exists set_updated_at on public.%I', t);
-    execute format('create trigger set_updated_at before update on public.%I for each row execute function public.set_updated_at()', t);
-  end loop;
-end $$;
+alter table public.user_settings enable row level security;
+alter table public.tasks enable row level security;
+alter table public.events enable row level security;
+alter table public.transactions enable row level security;
+alter table public.vehicles enable row level security;
+alter table public.vehicle_maintenance enable row level security;
+alter table public.fuel_entries enable row level security;
+alter table public.shopping_items enable row level security;
 
-do $$
-declare t text;
-begin
-  foreach t in array array['user_settings','tasks','events','transactions','vehicles','vehicle_maintenance','fuel_entries','shopping_items']
-  loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('drop policy if exists "DHub: acessar próprios dados" on public.%I', t);
-    execute format('create policy "DHub: acessar próprios dados" on public.%I for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)', t);
-    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
-    execute format('revoke all on public.%I from anon', t);
-  end loop;
-end $$;
+drop policy if exists "DHub: acessar proprios dados" on public.user_settings;
+create policy "DHub: acessar proprios dados" on public.user_settings
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.tasks;
+create policy "DHub: acessar proprios dados" on public.tasks
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.events;
+create policy "DHub: acessar proprios dados" on public.events
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.transactions;
+create policy "DHub: acessar proprios dados" on public.transactions
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.vehicles;
+create policy "DHub: acessar proprios dados" on public.vehicles
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.vehicle_maintenance;
+create policy "DHub: acessar proprios dados" on public.vehicle_maintenance
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.fuel_entries;
+create policy "DHub: acessar proprios dados" on public.fuel_entries
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "DHub: acessar proprios dados" on public.shopping_items;
+create policy "DHub: acessar proprios dados" on public.shopping_items
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.user_settings to authenticated;
+grant select, insert, update, delete on public.tasks to authenticated;
+grant select, insert, update, delete on public.events to authenticated;
+grant select, insert, update, delete on public.transactions to authenticated;
+grant select, insert, update, delete on public.vehicles to authenticated;
+grant select, insert, update, delete on public.vehicle_maintenance to authenticated;
+grant select, insert, update, delete on public.fuel_entries to authenticated;
+grant select, insert, update, delete on public.shopping_items to authenticated;
+
+revoke all on public.user_settings from anon;
+revoke all on public.tasks from anon;
+revoke all on public.events from anon;
+revoke all on public.transactions from anon;
+revoke all on public.vehicles from anon;
+revoke all on public.vehicle_maintenance from anon;
+revoke all on public.fuel_entries from anon;
+revoke all on public.shopping_items from anon;
