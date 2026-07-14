@@ -13,7 +13,6 @@ export default function WalletEnhancer() {
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     const organize = () => {
@@ -55,8 +54,7 @@ export default function WalletEnhancer() {
   const loadBalance = useCallback(async () => {
     if (!supabase) return
     const { data: sessionData } = await supabase.auth.getSession()
-    const id = sessionData.session?.user.id || null
-    setUserId(id)
+    const id = sessionData.session?.user.id
     if (!id) return
 
     const { data, error } = await supabase
@@ -72,6 +70,7 @@ export default function WalletEnhancer() {
 
     const value = Number(data?.wallet_balance || 0)
     setBalance(value)
+    setMessage('')
     if (!editing) setDraft(String(value).replace('.', ','))
   }, [editing])
 
@@ -83,44 +82,23 @@ export default function WalletEnhancer() {
     }
 
     safeLoad()
-    const interval = window.setInterval(safeLoad, 1200)
+    const interval = window.setInterval(safeLoad, 1000)
     const onFocus = () => safeLoad()
+    const onVisibility = () => { if (!document.hidden) safeLoad() }
     const onWalletChanged = () => safeLoad()
+
     window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('dhub-wallet-changed', onWalletChanged)
 
     return () => {
       active = false
       window.clearInterval(interval)
       window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('dhub-wallet-changed', onWalletChanged)
     }
   }, [loadBalance])
-
-  useEffect(() => {
-    if (!supabase || !userId) return
-
-    const channel = supabase
-      .channel(`dhub-wallet-${userId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'user_settings', filter: `user_id=eq.${userId}` },
-        payload => {
-          const value = Number((payload.new as { wallet_balance?: number }).wallet_balance || 0)
-          setBalance(value)
-          if (!editing) setDraft(String(value).replace('.', ','))
-          setMessage('')
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${userId}` },
-        () => window.setTimeout(loadBalance, 350),
-      )
-      .subscribe()
-
-    return () => { void supabase.removeChannel(channel) }
-  }, [editing, loadBalance, userId])
 
   async function save(event: FormEvent) {
     event.preventDefault()
