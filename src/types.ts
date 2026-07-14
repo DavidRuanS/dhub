@@ -1,5 +1,4 @@
-export type Tab = 'home' | 'agenda' | 'tasks' | 'finance' | 'car' | 'market'
-
+export type Tab = 'home' | 'agenda' | 'tasks' | 'finance' | 'car' | 'market' | 'settings'
 export type Task = { id:string; title:string; due_date:string|null; due_time:string|null; priority:'baixa'|'media'|'alta'; category:string; completed:boolean; remind:boolean; created_at:string }
 export type EventItem = { id:string; title:string; event_date:string; event_time:string|null; category:string; notes:string; created_at:string }
 export type Transaction = { id:string; type:'income'|'expense'; amount:number; description:string; category:string; transaction_date:string; is_extra:boolean; is_fixed:boolean; status:'paid'|'pending'; source:'manual'|'car'|'market'; created_at:string }
