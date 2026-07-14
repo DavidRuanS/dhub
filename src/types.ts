@@ -1,0 +1,98 @@
+export type Tab = 'home' | 'agenda' | 'tasks' | 'finance' | 'car' | 'market'
+
+export type Task = {
+  id: string
+  title: string
+  due_date: string | null
+  due_time: string | null
+  priority: 'baixa' | 'media' | 'alta'
+  category: string
+  completed: boolean
+  remind: boolean
+  created_at: string
+}
+
+export type EventItem = {
+  id: string
+  title: string
+  event_date: string
+  event_time: string | null
+  category: string
+  notes: string
+  created_at: string
+}
+
+export type Transaction = {
+  id: string
+  type: 'income' | 'expense'
+  amount: number
+  description: string
+  category: string
+  transaction_date: string
+  is_extra: boolean
+  is_fixed: boolean
+  status: 'paid' | 'pending'
+  source: 'manual' | 'car' | 'market'
+  created_at: string
+}
+
+export type Vehicle = {
+  id: string
+  nickname: string
+  model: string
+  year: string
+  mileage: number
+  created_at: string
+}
+
+export type Maintenance = {
+  id: string
+  vehicle_id: string
+  title: string
+  cost: number
+  performed_date: string
+  performed_mileage: number | null
+  next_date: string | null
+  next_mileage: number | null
+  notes: string
+  created_at: string
+}
+
+export type FuelEntry = {
+  id: string
+  vehicle_id: string
+  amount: number
+  liters: number | null
+  mileage: number | null
+  fuel_type: string
+  entry_date: string
+  created_at: string
+}
+
+export type ShoppingItem = {
+  id: string
+  name: string
+  quantity: string
+  category: string
+  estimated_price: number | null
+  actual_price: number | null
+  purchased: boolean
+  created_at: string
+}
+
+export type Settings = {
+  display_name: string
+  monthly_salary: number
+  payday: number
+}
+
+export type AppState = {
+  tasks: Task[]
+  events: EventItem[]
+  transactions: Transaction[]
+  vehicles: Vehicle[]
+  maintenance: Maintenance[]
+  fuel: FuelEntry[]
+  shopping: ShoppingItem[]
+  settings: Settings
+}
