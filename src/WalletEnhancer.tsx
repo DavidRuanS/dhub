@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from './lib/supabase'
 
@@ -13,6 +13,7 @@ export default function WalletEnhancer() {
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     const organize = () => {
@@ -51,34 +52,75 @@ export default function WalletEnhancer() {
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      if (!supabase) return
-      const { data: sessionData } = await supabase.auth.getSession()
-      const userId = sessionData.session?.user.id
-      if (!userId) return
-      const { data, error } = await supabase.from('user_settings').select('wallet_balance').eq('user_id', userId).maybeSingle()
-      if (!active) return
-      if (error) {
-        setMessage('Execute o SQL da Carteira no Supabase para ativar a sincronização.')
-        return
-      }
-      const value = Number(data?.wallet_balance || 0)
-      setBalance(value)
-      if (!editing) setDraft(String(value).replace('.', ','))
+  const loadBalance = useCallback(async () => {
+    if (!supabase) return
+    const { data: sessionData } = await supabase.auth.getSession()
+    const id = sessionData.session?.user.id || null
+    setUserId(id)
+    if (!id) return
+
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('wallet_balance')
+      .eq('user_id', id)
+      .maybeSingle()
+
+    if (error) {
+      setMessage('A Carteira ainda não está configurada corretamente no Supabase.')
+      return
     }
 
-    load()
-    const interval = window.setInterval(load, 2500)
-    const onFocus = () => load()
+    const value = Number(data?.wallet_balance || 0)
+    setBalance(value)
+    if (!editing) setDraft(String(value).replace('.', ','))
+  }, [editing])
+
+  useEffect(() => {
+    let active = true
+    const safeLoad = async () => {
+      if (!active) return
+      await loadBalance()
+    }
+
+    safeLoad()
+    const interval = window.setInterval(safeLoad, 1200)
+    const onFocus = () => safeLoad()
+    const onWalletChanged = () => safeLoad()
     window.addEventListener('focus', onFocus)
+    window.addEventListener('dhub-wallet-changed', onWalletChanged)
+
     return () => {
       active = false
       window.clearInterval(interval)
       window.removeEventListener('focus', onFocus)
+      window.removeEventListener('dhub-wallet-changed', onWalletChanged)
     }
-  }, [editing])
+  }, [loadBalance])
+
+  useEffect(() => {
+    if (!supabase || !userId) return
+
+    const channel = supabase
+      .channel(`dhub-wallet-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'user_settings', filter: `user_id=eq.${userId}` },
+        payload => {
+          const value = Number((payload.new as { wallet_balance?: number }).wallet_balance || 0)
+          setBalance(value)
+          if (!editing) setDraft(String(value).replace('.', ','))
+          setMessage('')
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${userId}` },
+        () => window.setTimeout(loadBalance, 350),
+      )
+      .subscribe()
+
+    return () => { void supabase.removeChannel(channel) }
+  }, [editing, loadBalance, userId])
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -88,13 +130,17 @@ export default function WalletEnhancer() {
     try {
       if (!supabase) throw new Error('Supabase não configurado.')
       const { data: sessionData } = await supabase.auth.getSession()
-      const userId = sessionData.session?.user.id
-      if (!userId) throw new Error('Entre novamente na sua conta.')
-      const { error } = await supabase.from('user_settings').update({ wallet_balance: value, updated_at: new Date().toISOString() }).eq('user_id', userId)
+      const id = sessionData.session?.user.id
+      if (!id) throw new Error('Entre novamente na sua conta.')
+      const { error } = await supabase
+        .from('user_settings')
+        .update({ wallet_balance: value, updated_at: new Date().toISOString() })
+        .eq('user_id', id)
       if (error) throw error
       setBalance(value)
       setEditing(false)
       setMessage('Saldo atualizado e sincronizado.')
+      window.dispatchEvent(new Event('dhub-wallet-changed'))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Não foi possível salvar o saldo.')
     } finally {
@@ -111,12 +157,15 @@ export default function WalletEnhancer() {
         <small>{compact ? 'Valor real disponível no banco e em dinheiro.' : 'Receitas recebidas somam e despesas pagas descontam automaticamente.'}</small>
         {message && <em>{message}</em>}
       </div>
-      {!compact && (!editing ? <button type="button" onClick={() => { setDraft(String(balance).replace('.', ',')); setEditing(true) }}>Ajustar</button> :
+      {!compact && (!editing ? (
+        <button type="button" onClick={() => { setDraft(String(balance).replace('.', ',')); setEditing(true) }}>Ajustar</button>
+      ) : (
         <form className="walletForm" onSubmit={save}>
           <input autoFocus inputMode="decimal" value={draft} onChange={event => setDraft(event.target.value)} placeholder="0,00" aria-label="Saldo atual da carteira" />
           <button type="submit" disabled={loading}>{loading ? 'Salvando…' : 'Salvar'}</button>
           <button type="button" onClick={() => setEditing(false)}>Cancelar</button>
-        </form>)}
+        </form>
+      ))}
     </article>
   )
 
