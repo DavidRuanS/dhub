@@ -5,6 +5,7 @@ import WalletEnhancer from './WalletEnhancer'
 import AgendaVoiceEnhancer from './AgendaVoiceEnhancer'
 import './styles.css'
 import './overrides.css'
+import './agenda-voice.css'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
