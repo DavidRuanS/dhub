@@ -17,13 +17,15 @@ export default function WalletEnhancer() {
     const findFinance = () => {
       const sections = Array.from(document.querySelectorAll<HTMLElement>('.app main section'))
       const finance = sections.find(section => section.querySelector('h1')?.textContent?.trim() === 'Finanças')
-      if (!finance) return setTarget(null)
+      if (!finance) {
+        setTarget(null)
+        return
+      }
       let host = finance.querySelector<HTMLElement>('.walletPortalHost')
       if (!host) {
         host = document.createElement('div')
         host.className = 'walletPortalHost'
-        const header = finance.firstElementChild
-        header?.insertAdjacentElement('afterend', host)
+        finance.firstElementChild?.insertAdjacentElement('afterend', host)
       }
       setTarget(host)
     }
@@ -34,20 +36,24 @@ export default function WalletEnhancer() {
   }, [])
 
   useEffect(() => {
-    if (!target || !supabase) return
+    const client = supabase
+    if (!target || !client) return
     let active = true
     const load = async () => {
-      const { data: sessionData } = await supabase.auth.getSession()
+      const { data: sessionData } = await client.auth.getSession()
       const userId = sessionData.session?.user.id
       if (!userId) return
-      const { data, error } = await supabase.from('user_settings').select('wallet_balance').eq('user_id', userId).maybeSingle()
+      const { data, error } = await client.from('user_settings').select('wallet_balance').eq('user_id', userId).maybeSingle()
       if (!active) return
-      if (error) return setMessage('Execute o SQL da Carteira no Supabase para ativar a sincronização.')
+      if (error) {
+        setMessage('Execute o SQL da Carteira no Supabase para ativar a sincronização.')
+        return
+      }
       const value = Number(data?.wallet_balance || 0)
       setBalance(value)
       setDraft(String(value).replace('.', ','))
     }
-    load()
+    void load()
     return () => { active = false }
   }, [target])
 
@@ -57,11 +63,12 @@ export default function WalletEnhancer() {
     setLoading(true)
     setMessage('')
     try {
-      if (!supabase) throw new Error('Supabase não configurado.')
-      const { data: sessionData } = await supabase.auth.getSession()
+      const client = supabase
+      if (!client) throw new Error('Supabase não configurado.')
+      const { data: sessionData } = await client.auth.getSession()
       const userId = sessionData.session?.user.id
       if (!userId) throw new Error('Entre novamente na sua conta.')
-      const { error } = await supabase.from('user_settings').update({ wallet_balance: value, updated_at: new Date().toISOString() }).eq('user_id', userId)
+      const { error } = await client.from('user_settings').update({ wallet_balance: value, updated_at: new Date().toISOString() }).eq('user_id', userId)
       if (error) throw error
       setBalance(value)
       setEditing(false)
@@ -83,11 +90,16 @@ export default function WalletEnhancer() {
         <small>Quanto você tem agora no banco e em dinheiro.</small>
         {message && <em>{message}</em>}
       </div>
-      {!editing ? <button type="button" onClick={() => { setDraft(String(balance).replace('.', ',')); setEditing(true) }}>Ajustar</button> :
+      {!editing ? (
+        <button type="button" onClick={() => { setDraft(String(balance).replace('.', ',')); setEditing(true) }}>Ajustar</button>
+      ) : (
         <form className="walletForm" onSubmit={save}>
           <input autoFocus inputMode="decimal" value={draft} onChange={event => setDraft(event.target.value)} placeholder="0,00" aria-label="Saldo atual da carteira" />
           <button type="submit" disabled={loading}>{loading ? 'Salvando…' : 'Salvar'}</button>
           <button type="button" onClick={() => setEditing(false)}>Cancelar</button>
-        </form>}
-    </article>, target)
+        </form>
+      )}
+    </article>,
+    target
+  )
 }
