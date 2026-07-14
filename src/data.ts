@@ -18,6 +18,10 @@ function localLoad(): AppState {
   } catch { return emptyState }
 }
 
+function hasUsefulData(state: AppState) {
+  return state.tasks.length + state.events.length + state.transactions.length + state.vehicles.length + state.maintenance.length + state.fuel.length + state.shopping.length > 0 || Number(state.settings.monthly_salary) > 0
+}
+
 function localSave(state: AppState) { localStorage.setItem(KEY, JSON.stringify(state)) }
 
 const tableMap = {
@@ -26,11 +30,12 @@ const tableMap = {
 } as const
 
 export async function loadState(): Promise<AppState> {
-  if (!hasSupabase || !supabase) return localLoad()
+  const local = localLoad()
+  if (!hasSupabase || !supabase) return local
   const client = supabase
   try {
     const session = await ensureAnonymousSession()
-    if (!session) return localLoad()
+    if (!session) return local
     const entries = await Promise.all(Object.entries(tableMap).map(async ([key, table]) => {
       const { data, error } = await client.from(table).select('*')
       if (error) throw error
@@ -38,7 +43,7 @@ export async function loadState(): Promise<AppState> {
     }))
     const map = Object.fromEntries(entries) as Record<string, unknown>
     const settingsRow = Array.isArray(map.settings) ? map.settings[0] : null
-    return {
+    const remote: AppState = {
       tasks: (map.tasks || []) as Task[], events: (map.events || []) as EventItem[],
       transactions: (map.transactions || []) as Transaction[], vehicles: (map.vehicles || []) as Vehicle[],
       maintenance: (map.maintenance || []) as Maintenance[], fuel: (map.fuel || []) as FuelEntry[],
@@ -49,9 +54,12 @@ export async function loadState(): Promise<AppState> {
         payday: Number((settingsRow as Settings).payday),
       } : emptyState.settings,
     }
+    // Na primeira entrada com conta, reaproveita o que já estava salvo neste aparelho.
+    // O App persistirá esse estado na conta e os outros dispositivos passarão a recebê-lo.
+    return !hasUsefulData(remote) && hasUsefulData(local) ? local : remote
   } catch (error) {
     console.error('Falha no Supabase, usando modo local:', error)
-    return localLoad()
+    return local
   }
 }
 
