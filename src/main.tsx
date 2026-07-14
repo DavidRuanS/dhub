@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import AuthGate from './AuthGate'
 import './styles.css'
+import './overrides.css'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
