@@ -2,8 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import AuthGate from './AuthGate'
 import WalletEnhancer from './WalletEnhancer'
+import AgendaEditEnhancer from './AgendaEditEnhancer'
 import './styles.css'
 import './overrides.css'
+import './agenda-edit.css'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -12,5 +14,5 @@ if ('serviceWorker' in navigator) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><AuthGate /><WalletEnhancer /></StrictMode>,
+  <StrictMode><AuthGate /><WalletEnhancer /><AgendaEditEnhancer /></StrictMode>,
 )
